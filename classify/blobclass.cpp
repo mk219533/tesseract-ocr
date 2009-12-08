@@ -87,6 +87,7 @@ LearnBlob (const STRING& filename,
   // If no fontname was set, try to extract it from the filename
   char CurrFontName[32] = "";
   strncpy(CurrFontName, static_cast<STRING>(classify_font_name).string(), 32);
+/*
   if (!strcmp(CurrFontName, "UnknownFont")) {
     // filename is expected to be of the form [lang].[fontname].exp[num]
     // The [lang], [fontname] and [num] fields should not have '.' characters.
@@ -97,7 +98,7 @@ LearnBlob (const STRING& filename,
       strncpy(CurrFontName, firstdot + 1, lastdot - firstdot - 1);
     }
   }
-
+//*/
   // if a feature file is not yet open, open it
   // the name of the file is the name of the image plus TRAIN_SUFFIX
   if (FeatureFile == NULL) {
