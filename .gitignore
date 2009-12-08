@@ -1,3 +1,5 @@
 tessdata
 *.dll
 .deps
+.cproject
+.project
