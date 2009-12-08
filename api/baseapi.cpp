@@ -58,6 +58,11 @@
 #include "chopper.h"
 #include "matchtab.h"
 
+#include <iostream>
+#include <sstream>
+#include <string>
+using namespace std;
+
 namespace tesseract {
 
 // Minimum sensible image size to be worth running tesseract.
@@ -701,6 +706,129 @@ char* TessBaseAPI::GetUTF8Text() {
   *ptr++ = '\n';
   *ptr = '\0';
   return result;
+}
+
+static int IsParagraphBreak(TBOX bbox_cur, TBOX bbox_prev, int right, int x_height) {
+  /* Check if the distance between lines is larger than normal leading */
+  if (bbox_cur.bottom() - bbox_prev.bottom() > x_height * 1.2)
+    return true;
+  
+  /* Check if the distance between left bounds of the two lines is nearly the same as between
+  /* their right bounds (if so, then both lines probably belong to the same paragraph,
+  /* maybe a centered one) */
+  if (fabs((bbox_cur.left() - bbox_prev.left()) - (bbox_prev.right() - bbox_cur.right()) < x_height))
+    return false;
+  
+  /* Check if there is a paragraph indent at this line (either negative or positive) */
+  if (fabs(bbox_cur.left() - bbox_prev.left()) > x_height)
+    return true;
+  
+  /* Check if both current and previous line don't reach the right bound of the block, but
+  /* the distance is different. This will cause all lines in a verse to be treated as separate
+  /* paragraphs, but most probably will not split block-quotes to separate lines (at least if
+  /* the text is justified */
+  if (fabs(bbox_cur.right() - bbox_prev.right()) > x_height &&
+      right - bbox_cur.right() > x_height && right - bbox_prev.right() > x_height)
+    return true;
+    
+  return false;
+}
+
+// Make a HTML-formatted string with hOCR markup from the internal data structures.
+char* TessBaseAPI::GetHOCRText(int page_id) {
+  if (tesseract_ == NULL ||
+      (page_res_ == NULL && Recognize(NULL) < 0))
+    return NULL;
+  
+  PAGE_RES_IT page_res_it(page_res_);
+  ROW_RES *row = NULL;           //current row
+  ROW *real_row = NULL, *prev_row = NULL;
+  BLOCK_RES *block = NULL;       //current row
+  BLOCK *real_block = NULL;
+  int lcnt = 1, bcnt = 1, wcnt = 1;
+
+  ostringstream outStrm;
+
+  outStrm << "<div class='ocr_page' id='page_" << page_id << "' ";
+  outStrm << "title='image \""  << input_file_->string() << "\"; bbox "
+          << rect_left_  << " " << rect_top_    << " "
+          << rect_width_ << " " << rect_height_ << "'>" << endl;
+
+  for (page_res_it.restart_page(); page_res_it.word () != NULL;
+       page_res_it.forward()) {
+    if (block != page_res_it.block ()) {
+      
+      if (block != NULL) {
+        outStrm << "</span>" << endl << "</p>" << endl << "</div>" << endl;
+      }
+      
+      block = page_res_it.block ();  //current row
+      real_block = block->block;
+      real_row = NULL;
+      row = NULL;
+      
+      outStrm << "<div class='ocr_carea' id='block_" << page_id << "_" << bcnt++ << "' ";
+      outStrm << "title=\"bbox ";
+      outStrm << real_block->bounding_box().left()   << " ";
+      outStrm << real_block->bounding_box().top()    << " "
+              << real_block->bounding_box().right()  << " "
+              << real_block->bounding_box().bottom() << "\">" << endl;
+      outStrm << "<p class='ocr_par'>" << endl;
+    }
+    if (row != page_res_it.row ()) {
+      
+      if (row != NULL) {
+        outStrm << "</span>" << endl;
+      }
+      prev_row = real_row;
+      
+      row = page_res_it.row ();  //current row
+      real_row = row->row;
+      
+      if (prev_row != NULL && 
+          IsParagraphBreak(real_row->bounding_box(), prev_row->bounding_box(),
+                           real_block->bounding_box().right(), real_row->x_height()))
+        outStrm << "</p>" << endl << "<p class='ocr_par'>" << endl;
+      
+      outStrm << "<span class='ocr_line' id='line_"  << page_id << "_" << lcnt++ << "' ";
+      outStrm << "title=\"bbox ";
+      outStrm << real_row->bounding_box().left()     << " "
+              << real_row->bounding_box().top()      << " "
+              << real_row->bounding_box().right()    << " "
+              << real_row->bounding_box().bottom()   << "\">";
+    }
+
+    WERD_RES *word = page_res_it.word();
+    WERD_CHOICE* choice = word->best_choice;
+    if (choice != NULL) {
+      outStrm << "<span class='ocr_word' id='word_"  << page_id << "_" << wcnt   << "' ";
+      outStrm << "title=\"bbox ";
+      outStrm << word->word->bounding_box().left()   << " "
+              << word->word->bounding_box().top()    << " "
+              << word->word->bounding_box().right()  << " "
+              << word->word->bounding_box().bottom() << "\">";
+      outStrm << "<span class='xocr_word' id='xword_"<< page_id << "_" << wcnt++ << "' ";
+      outStrm << "title=\""
+              << "x_wconf " << choice->certainty()   << "\">";
+      if (word->bold > 0)
+        outStrm << "<strong>";
+      if (word->italic > 0)
+        outStrm << "<em>";
+      outStrm << choice->unichar_string().string();
+      if (word->italic > 0)
+        outStrm << "</em>";
+      if (word->bold > 0)
+        outStrm << "</strong>";
+      outStrm << "</span>" << "</span>";
+      if (!word->word->flag(W_EOL))
+        outStrm << ' ';
+    }
+  }
+  outStrm << "</span>" << endl << "</p>" << endl;  
+  outStrm << "</div>"  << endl<< "</div>"  << endl;  
+  char *ret = new char[outStrm.str().length() + 1];
+  strcpy(ret, (char *) outStrm.str().c_str());
+  return ret;
 }
 
 static int ConvertWordToBoxText(WERD_RES *word,

@@ -38,6 +38,11 @@
 #include "blread.h"
 #include "tfacep.h"
 #include "callnet.h"
+#include "ctype.h"
+
+#include <iostream>
+#include <fstream>
+using namespace std;
 
 // Include automatically generated configuration file if running autoconf
 #ifdef HAVE_CONFIG_H
@@ -62,6 +67,7 @@ void read_tiff_image(TIFF* tif, IMAGE* image);
 #define EXTERN
 
 BOOL_VAR(tessedit_create_boxfile, FALSE, "Output text with boxes");
+BOOL_VAR(tessedit_create_hocr, FALSE, "Output HTML with hOCR markup");
 BOOL_VAR(tessedit_read_image, TRUE, "Ensure the image is read");
 INT_VAR(tessedit_serial_unlv, 0,
         "0->Whole page, 1->serial no adapt, 2->serial with adapt");
@@ -102,6 +108,7 @@ char szAppName[] = "Tessedit";   //app name
 // analyzer.
 void TesseractImage(const char* input_file, IMAGE* image, Pix* pix,
                     tesseract::TessBaseAPI* api, STRING* text_out) {
+  static int page_id = 1;
   api->SetInputName(input_file);
 #ifdef HAVE_LIBLEPT
   if (pix != NULL) {
@@ -122,6 +129,8 @@ void TesseractImage(const char* input_file, IMAGE* image, Pix* pix,
       text = api->GetBoxText();
     else if (tessedit_write_unlv)
       text = api->GetUNLVText();
+    else if (tessedit_create_hocr)
+      text = api->GetHOCRText(page_id++);
     else
       text = api->GetUTF8Text();
     *text_out += text;
@@ -223,7 +232,10 @@ int main(int argc, char **argv) {
 #else
 #ifdef _TIFFIO_
   int len = strlen(argv[1]);
-  if (len > 3 && strcmp("tif", argv[1] + len - 3) == 0) {
+  char* ext = new char[5];
+  for (int i=4; i>=0; i--)
+    ext[4-i] = (char) tolower((int) argv[1][len - i]);
+  if (len > 3 && (strcmp("tif",  ext + 1) == 0 || strcmp("tiff", ext) == 0)) {
     // Use libtiff to read a tif file so multi-page can be handled.
     // The page number so the tiff file can be closed and reopened.
     int page_number = tessedit_page_number;
@@ -275,11 +287,29 @@ int main(int argc, char **argv) {
 #endif  // HAVE_LIBLEPT
 
   outfile = argv[2];
-  outfile += ".txt";
-  FILE* fp = fopen(outfile.string(), "w");
-  if (fp != NULL) {
-    fwrite(text_out.string(), 1, text_out.length(), fp);
-    fclose(fp);
+  if (tessedit_create_hocr) {
+    outfile += ".html";
+    ofstream fp;
+    fp.open(outfile.string());
+    if (fp != NULL) {
+      fp << "<!DOCTYPE html PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\""
+            " \"http://www.w3.org/TR/html4/loose.dtd\">" << endl;
+      fp << "<html>" << endl << "<head>" << endl << "<title></title>" << endl;
+      fp << "<meta http-equiv=\"Content-Type\" content=\"text/html;charset=utf-8\" >" << endl;
+      fp << "<meta name='ocr-system' content='tesseract'>" << endl;
+      fp << "</head>" << endl << "<body>" << endl;  
+      fp << text_out.string();
+      fp << "</body>" << endl << "</html>";  
+      fp.close();
+    }
+  } else {
+    outfile += ".txt";
+    ofstream fp;
+    fp.open(outfile.string());
+    if (fp != NULL) {
+      fp << text_out.string();
+      fp.close();
+    }
   }
 
   return 0;                      //Normal exit
