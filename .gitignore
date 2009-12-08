@@ -3,3 +3,11 @@ tessdata
 .deps
 .cproject
 .project
+*.o
+*.a
+api/tesseract
+training/cntraining
+training/combine_tessdata
+training/mftraining
+training/unicharset_extractor
+training/wordlist2dawg
